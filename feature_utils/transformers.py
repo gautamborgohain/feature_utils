@@ -252,10 +252,9 @@ class PcaTransformer(BaseEstimator, TransformerMixin):
         self.select_feat_grps = select_feat_grps #['all', 'top']
         self.pca_info = []
         
-    def fit(self, X:pd.DataFrame, y:pd.Series):
-        
+    def fit(self, X:pd.DataFrame, y:pd.Series=None):
         if self.generate_feat_groups:
-#             assert 'TARGET' in X.columns, 'Please provide the label in TARGET column'
+            assert y is not None , "please provide y to find feature groups or else just provide the groups"
             if self.n_feat_groups is None:
                 self.n_feat_groups = X.shape[1] // 10    
             self.feat_groups_to_pca = get_groups_to_pca(X,y,n_feat_groups=self.n_feat_groups,

@@ -10,6 +10,7 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.decomposition import PCA
 from sklearn import metrics
+from sklearn.cluster import KMeans
 
 from scipy import stats
 from scipy.special import boxcox1p

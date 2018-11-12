@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='feature_utils',
-      version='0.1a',
+      version='0.1b',
       description='Utilities for generating features for machine learning pipelines',
       author='Gautam Borgohain',
       author_email='gautamborgohain90@gmail.com',
