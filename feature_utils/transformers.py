@@ -104,10 +104,18 @@ class MissingValueImputer(BaseEstimator, TransformerMixin):
 
     def transform(self, X:pd.DataFrame):
         assert type(X) == pd.DataFrame, "Please make sure input is a pandas dataframe"
-        high_pec_missing = []
+        high_pec_missing,cols_added = [],[]
         for c in tqdm(X.columns, desc='Imputing Missing Values'):
             if X[c].isna().sum()/len(X[c]) >= 0.05:
                 high_pec_missing.append(c)
+           
+            missing_idx = X[X[c].isna()].index     
+            if len(missing_idx > 0):
+                miss_col = f'{c}_is_missing'
+                X[miss_col] = 0
+                X.loc[missing_idx][miss_col] = 1
+                cols_added.append(miss_col)
+                
             if X[c].dtype in ['int32', 'int64']:
                 X[c].fillna(0, inplace=True)
                 X[c].replace([np.inf, -np.inf], 0, inplace=True)
@@ -117,6 +125,7 @@ class MissingValueImputer(BaseEstimator, TransformerMixin):
             elif X[c].dtype in ['object']:
                  X[c].fillna('UNK', inplace=True)
         print(f'Features with high perc of missing values: {high_pec_missing}')
+        print(f'Missing value cols added : {cols_added}')
         return X
     
 class CategoricalEncoder(BaseEstimator, TransformerMixin):
@@ -134,25 +143,26 @@ class CategoricalEncoder(BaseEstimator, TransformerMixin):
         
 class DataScaler(BaseEstimator, TransformerMixin):
 
-    def __init__(self, with_centering=True, with_scaling=True):
-        self.with_centering = with_centering
-        self.with_scaling = with_scaling
+    def __init__(self, method:str ='robust', columns_to_scale:Optional[list]=None):
+        self.columns_to_scale = columns_to_scale
         self.scalers = {}
+        self.method = method
 
     def transform(self, X:pd.DataFrame):
-        for c, scaler in tqdm(self.scalers.items(),desc ='Scaling'):
+        for c, scaler in tqdm(self.scalers.items(),desc =f'{self.method} Scaling'):
             X[c] = scaler.transform(np.array(X[c]).reshape(-1,1))
-#             X[c] = robust_scale(np.array(X[c]).reshape(-1,1), \
-#                                 axis=0, \
-#                                 with_centering=self.with_centering, \
-#                                 with_scaling=self.with_scaling)   
         return X
 
     def fit(self, X:pd.DataFrame, y:Any=None):
-        for c in tqdm(X.columns, desc = "Fitting Scaler"):
+        if self.columns_to_scale is None:
+            self.columns_to_scale = X.columns
+        for c in tqdm(self.columns_to_scale, desc = f"Fitting {self.method} Scaler"):
             if X[c].dtype in ['float32', 'float64', 'int32', 'int64']:
-                self.scalers[c] = RobustScaler(with_centering=self.with_centering,
-                                                 with_scaling=self.with_scaling).fit(np.array(X[c]).reshape(-1,1))
+                if self.method == 'robust':
+                    self.scalers[c] = RobustScaler(with_centering=True,
+                                                   with_scaling=True).fit(np.array(X[c]).reshape(-1,1))
+                elif self.method == 'standard':
+                    self.scalers[c] = StandardScaler(with_mean=True,with_std=True).fit(np.array(X[c]).reshape(-1,1))
         return self
     
 class LogTransformer(BaseEstimator, TransformerMixin):
@@ -170,17 +180,17 @@ class LogTransformer(BaseEstimator, TransformerMixin):
 
 class DateFeatureGenerator(BaseEstimator, TransformerMixin):
     
-    def __init__(self, date_col, drop_col=True):
+    def __init__(self, date_col, drop_col=True, date_features=['year', 'day', 'month']):
         self.date_col = date_col
         self.drop_col=drop_col
-        self.date_features = ['year', 'day', 'month']
+        self.date_features = date_features
         
     def transform(self, X:pd.DataFrame):
         if self.date_col in X.columns:
             X[self.date_col] = pd.to_datetime(X[self.date_col])
             for f in tqdm(self.date_features,  desc="Generating date feats"):
                 X[f'{self.date_col}_{f}'] = X[self.date_col].dt.__getattribute__(f)
-            if self.drop_col: X.drop(self.date_col, inplace=True, axis=1)
+            if self.drop_col: del X[self.date_col] 
         else:
             print(f'{self.date_col} does not exist')
         return X

@@ -12,8 +12,6 @@ def get_correlated_features(X:pd.DataFrame,
     """
     Return feature groups.
     """
-#     if 'TARGET' in X.columns:
-#         X = X.drop('TARGET', axis=1)
     X = X.sample(frac = frac, random_state=37)
     print('generating correlation matrix')
     corr_df = X.corr(method=method)
@@ -34,8 +32,6 @@ def get_feature_importance(X:pd.DataFrame,
         model = lgb.LGBMClassifier(random_state=37)
     else:
         model = lgb.LGBMRegressor(random_state=37)
-#     y = X['TARGET']
-#     X = X.drop('TARGET',  axis=1)
     model.fit(X,y)
     feature_importance = {col:imp for col, imp in zip(X.columns, model.feature_importances_)}
     return feature_importance
