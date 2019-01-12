@@ -143,7 +143,7 @@ class CategoricalEncoder(BaseEstimator, TransformerMixin):
         
 class DataScaler(BaseEstimator, TransformerMixin):
 
-    def __init__(self, method:str ='robust', columns_to_scale:Optional[list]=None):
+    def __init__(self, method:str ='standard', columns_to_scale:Optional[list]=None):
         self.columns_to_scale = columns_to_scale
         self.scalers = {}
         self.method = method
@@ -155,7 +155,7 @@ class DataScaler(BaseEstimator, TransformerMixin):
 
     def fit(self, X:pd.DataFrame, y:Any=None):
         if self.columns_to_scale is None:
-            self.columns_to_scale = X.columns
+            self.columns_to_scale = [c for c in X.columns if c not in ['target', 'TARGET']]
         for c in tqdm(self.columns_to_scale, desc = f"Fitting {self.method} Scaler"):
             if X[c].dtype in ['float32', 'float64', 'int32', 'int64']:
                 if self.method == 'robust':

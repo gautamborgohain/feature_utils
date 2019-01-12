@@ -26,16 +26,20 @@ def calc_rmse(y_true, y_pred):
     else:
         return sqrt(((y_true-y_pred)**2)/2)
 
-def train_test_lightgbm(df, lgbm_params={}, classification=True, split=0.33, early_stopping_rounds=300, eval_metric=None):
+def train_test_lightgbm(df, lgbm_params={}, classification=True, split=0.33, early_stopping_rounds=300, eval_metric=None,score_submission=False,test_df=None, random_state=42):
     """
     Returns model, X_train, X_test, train_preds, y_train, y_test , test_preds
+    
+    
+    if score_submission is True, returns:
+    model, X_train, X_test, train_preds, y_train, y_test , test_preds, submission_preds
     """
     y = df['TARGET']
     X = df.drop('TARGET', axis=1)
     del df
     gc.collect()
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split, random_state=random_state)
     print(len(X_train), len(X_test))
     print('Training Model ... ')
     if classification:
@@ -43,7 +47,7 @@ def train_test_lightgbm(df, lgbm_params={}, classification=True, split=0.33, ear
         model = lgb.LGBMClassifier(**lgbm_params)
         model.fit(X_train, y_train, \
                     early_stopping_rounds=early_stopping_rounds, \
-                    eval_set=(X_test,y_test),\
+                    eval_set=[(X_train, y_train),(X_test,y_test)],\
                     eval_metric=eval_metric,\
                     verbose=100)
     else:
@@ -51,13 +55,13 @@ def train_test_lightgbm(df, lgbm_params={}, classification=True, split=0.33, ear
         model = lgb.LGBMRegressor(**lgbm_params)
         model.fit(X_train, y_train, \
                     early_stopping_rounds=early_stopping_rounds, \
-                    eval_set=(X_test,y_test),\
+                    eval_set=[(X_train, y_train),(X_test,y_test)],\
                     eval_metric=eval_metric,\
                     verbose=100)
     
     print('Evaluating ... ')
-    train_preds = model.predict(X_train)
-    test_preds = model.predict(X_test)
+    train_preds = model.predict(X_train, num_iteration=model.best_iteration_)
+    test_preds = model.predict(X_test, num_iteration=model.best_iteration_)
     
     if classification:
         train_score = metrics.accuracy_score(y_train, train_preds)
@@ -73,23 +77,34 @@ def train_test_lightgbm(df, lgbm_params={}, classification=True, split=0.33, ear
         print('Test R2 : ', metrics.r2_score(y_test, test_preds))
         print('mean_absolute_error : ', metrics.mean_absolute_error(y_test, test_preds))
         print('RMSE : ', sqrt(metrics.mean_squared_error(y_test, test_preds)))
-        
+    if score_submission:
+        submission_preds = model.predict(test_df[X_train.columns], num_iteration=model.best_iteration_)  
+        return model, X_train, X_test, train_preds, y_train, y_test , test_preds, submission_preds
+
     return model, X_train, X_test, train_preds, y_train, y_test , test_preds
     
 
-def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratified = False, feats_sub=None, eval_metric=None):
+def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratified = False, feats_sub=None, eval_metric=None,score_submission=False,test_df=None,random_state=1001):
+    """
+    Returns feature_importance_df
+    
+    if score_submission = True, returns feature_importance_df,test_df
+    """
     # Divide in training/validation and test data
     train_df = df[df['TARGET'].notnull()]
+    if score_submission:
+        submission_preds = np.zeros(test_df.shape[0])
     print("Starting LightGBM. Train shape: {}".format(train_df.shape))
     del df
     gc.collect()
     # Cross validation model
     if stratified and classification:
-        folds = StratifiedKFold(n_splits= num_folds, shuffle=True, random_state=1001)
+        folds = StratifiedKFold(n_splits= num_folds, shuffle=True, random_state=random_state)
     else:
-        folds = KFold(n_splits= num_folds, shuffle=True, random_state=1001)
+        folds = KFold(n_splits= num_folds, shuffle=True, random_state=random_state)
     # Create arrays and dataframes to store results
     oof_preds = np.zeros(train_df.shape[0])
+    
     feature_importance_df = pd.DataFrame()
     if feats_sub:
         feats = list(set(feats_sub) & set(train_df.columns)) + ['TARGET']
@@ -108,7 +123,8 @@ def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratif
                       verbose= 100, 
                       early_stopping_rounds= 200)
             oof_preds[valid_idx] = model.predict_proba(valid_x, num_iteration=model.best_iteration_)[:, 1]
-
+            if score_submission:
+                submission_preds += model.predict_proba(test_df[feats], num_iteration=model.best_iteration_)[:, 1] / folds.n_splits
         else:
             eval_metric = 'rmse,mae,poisson' if eval_metric is None else eval_metric
             model = lgb.LGBMRegressor(**lgbm_params)
@@ -117,6 +133,8 @@ def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratif
                       verbose= 100, 
                       early_stopping_rounds= 300)
             oof_preds[valid_idx] = model.predict(valid_x, num_iteration=model.best_iteration_)
+            if score_submission:
+                submission_preds += model.predict(test_df[feats], num_iteration=model.best_iteration_) / folds.n_splits
         fold_importance_df = pd.DataFrame()
         fold_importance_df["feature"] = feats
         fold_importance_df["importance"] = model.feature_importances_
@@ -126,7 +144,11 @@ def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratif
             print('Fold %2d AUC : %.6f' % (n_fold + 1, metrics.roc_auc_score(valid_y, oof_preds[valid_idx])))
         else:
             print('Fold %2d RMSE : %.6f' % (n_fold + 1, np.sqrt(metrics.mean_squared_error(valid_y, oof_preds[valid_idx]))))
-        
+            
+        if score_submission:
+            test_df['TARGET'] = submission_preds
+            
+            
         del model, train_x, train_y, valid_x, valid_y
         gc.collect()
     
@@ -134,8 +156,11 @@ def kfold_lightgbm(df, lgbm_params={}, num_folds=4, classification=True, stratif
         print('Full AUC score %.6f' % metrics.roc_auc_score(train_df['TARGET'], oof_preds))
     else:
         print('Full RMSE score %.6f' % np.sqrt(metrics.mean_squared_error(train_df['TARGET'], oof_preds)))
-    
-    return feature_importance_df
+        
+    if score_submission:
+        return feature_importance_df, test_df
+    else:
+        return feature_importance_df
 
 
 def time_series_lightgbm(df, lgbm_params={}, classification=True):
